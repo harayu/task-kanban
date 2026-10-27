@@ -6,14 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-`create-next-app` で生成した直後の Next.js アプリで、タスク管理用カンバン（task-kanban）を作るための土台です。現時点の `src/app/page.tsx` はテンプレートのままです。
-ステータス管理 (Todo In Progress / Done) とタスクの CRUD を行うための UI を作ることが目的です。
-Next.js + Supabase で構築し、Vercelにデプロイすることを想定しています。
+タスク管理用カンバン（task-kanban）。ステータス管理 (Todo / In Progress / Done) とタスクの CRUD を行う。
+Next.js + Supabase で構築し、Vercelにデプロイすることを想定しています。認証は未導入。
+
+## アーキテクチャ
+
+トップページ（`src/app/page.tsx`）がカンバン。データの流れ:
+
+1. `page.tsx`（async Server Component）が `src/lib/tasks/queries.ts` の `fetchTasks()` で一覧を取得し、`<TaskBoard initialTasks>` に渡す。取得失敗時は `role="alert"` のエラー表示。
+   - `cacheComponents` 環境で cookies を読むページは Suspense 境界が必要なため、`src/app/loading.tsx` を置いている（ビルド結果は `◐ Partial Prerender`）。消さないこと。
+2. 変更系は `src/app/actions.ts` の Server Action（`createTask` / `updateTask(id, input)` / `deleteTask(id)`）。
+   - 戻り値は `ActionResult<T>`（`{ ok: true, data }` / `{ ok: false, error }`）で、**例外は投げない**。新しいアクションもこの形に揃える。
+   - Server Action は直接 POST でも呼べるため、サーバー側でも必ず `validateTaskInput()` を通す。
+   - 成功時は `revalidatePath("/")` を呼ぶ。
+3. `src/components/TaskBoard.tsx`（Client Component）は `initialTasks` を `useState` に入れ、**Server Action の戻り値でローカル状態を更新して即時反映**する（router.refresh や再取得には頼らない）。エラーはボード上部の `role="alert"` に1つだけ表示する。
+   - `TaskForm`: 追加・編集で共用。送信前にクライアント側でも検証し、送信中はボタンを無効化。`onSubmit` が `true` を返したときだけ入力をリセットする。フォームは `onSubmit` + `preventDefault` で実装（`<form action>` ではない）。
+   - `TaskCard`: 表示と、カード内での編集切り替え。削除は `ConfirmDialog` で確認してから実行する。
+   - `ConfirmDialog`: `role="alertdialog"` の自前ダイアログ。`window.confirm` は使わない。初期フォーカスはキャンセル、Esc でキャンセル。
+4. 型・定数は `src/lib/tasks/types.ts` に集約。`Task` / `TaskStatus` は生成型（`database.types.ts`）から派生させ、手書きで重複定義しない。列の並びと表示ラベルは `TASK_STATUSES` を使う。
+
+## データベース
+
+- `public.tasks`（マイグレーション名 `create_tasks_table`、Supabase MCP の `apply_migration` で適用済み）
+  | カラム | 型 | 制約 |
+  |---|---|---|
+  | `id` | uuid | PK, `gen_random_uuid()` |
+  | `title` | text | not null, 1〜100文字 |
+  | `description` | text | not null, default `''`, 500文字以下 |
+  | `status` | `task_status` enum (`todo` / `in_progress` / `done`) | not null, default `todo` |
+  | `created_at` / `updated_at` | timestamptz | `updated_at` はトリガー `tasks_set_updated_at`（関数 `public.set_updated_at`）で自動更新 |
+- 文字数ルールは DB の check 制約と `src/lib/tasks/validation.ts`（`TITLE_MAX_LENGTH` / `DESCRIPTION_MAX_LENGTH`）の両方にある。**変更するときは両方を揃える**。
+- 一覧は `created_at` の昇順。
+- RLS は有効だが、認証未導入のため anon / authenticated に全操作を許可するポリシー（`tasks_*_all`）を付けている。認証を導入するときは `user_id` カラムを追加し、ポリシーを本人のみに差し替えること。
+- スキーマ変更の手順: `list_tables` で現状確認 → `apply_migration`（DDL は `execute_sql` ではなくこちら）→ `get_advisors`（security）で警告確認 → `generate_typescript_types` の結果で `src/lib/supabase/database.types.ts` を上書き（手で編集しない）。
+- project_id は `hpqglnfsckehpotywsiv`。
 
 ## コマンド
 
 ```bash
-npm run dev        # 開発サーバー (http://localhost:3000)
+npm run dev        # 開発サーバー (http://localhost:3000)。すでに起動中だと二重起動できずエラー終了する
 npm run build      # 本番ビルド
 npm run start      # ビルド済みアプリの起動
 npm run lint       # ESLint (flat config: eslint.config.mjs)
@@ -52,6 +83,12 @@ npx vitest run -t "見出しが表示される"
 
 - Vitest + jsdom + React Testing Library。`vitest.setup.ts` で `@testing-library/jest-dom/vitest` のマッチャー登録と、各テスト後の `cleanup()` を行っている。
 - テストは `src/__tests__/` に置き、テスト名は日本語で書いている（既存の `page.test.tsx` 参照）。
+- Supabase を使うコードのテストでは、外部依存の `@/lib/supabase/server` と `next/cache` だけを `vi.mock` し、`src/__tests__/helpers/fakeSupabase.ts` のインメモリのフェイクを `vi.mocked(createClient).mockResolvedValue(fake.client)` で差し込む（Server Action やコンポーネント自体はモックしない）。
+  - `createFakeSupabase(rows)` はテストごとに生成する。`fake.rows` で DB 側の状態を検証し、`fake.failNext("msg")` で次の1回のクエリを失敗させる。`buildTask()` でテスト用タスクを作る。
+  - 新しいクエリの書き方（メソッドチェーン）を使ったら、フェイクにも同じチェーンを追加する。
+- async Server Component のページは `render(await Home())` で描画してテストする。
+- `@testing-library/user-event` は未導入。操作は `fireEvent`、非同期の反映は `findBy*` で待つ。
+- 要素は role と accessible name で取る（列は `region`、カードはタイトル名の `article`、フォームは `form`（「タスクを追加」/「タスクを編集」）、削除確認は `alertdialog`、エラーは `alert`）。UI を変えるときはこれらの role と名前を維持すること。
 
 ## テストルール
 
@@ -84,3 +121,4 @@ npx vitest run -t "見出しが表示される"
 ## MCP活用ルール
 
 - Next.js・Supabase・Vitestなどの最新仕様は、Context7を使って公式ドキュメントを参照すること。学習データの情報は古い可能性があるため、必ず公式ドキュメントで確認すること。
+  - Context7 に接続できない場合は、Next.js は `node_modules/next/dist/docs/`、Supabase は Supabase MCP の `search_docs` で確認する。
