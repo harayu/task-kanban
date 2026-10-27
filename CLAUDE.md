@@ -33,6 +33,21 @@ npx vitest run -t "見出しが表示される"
 - ページ・レイアウトの props 型には Next.js が自動生成するグローバル型（例: `LayoutProps<"/">`）を使っている。
 - パスエイリアス `@/*` → `./src/*`（tsconfig と Vitest の `resolve.tsconfigPaths` で共通）。
 
+## Supabase 接続設定
+
+- パッケージは `@supabase/ssr` + `@supabase/supabase-js`。クライアントは `src/lib/supabase/` 配下のものを使い、`createBrowserClient` / `createServerClient` を直接呼ばないこと。
+  - `client.ts` の `createClient()`: Client Component 用（同期関数）。
+  - `server.ts` の `createClient()`: Server Component / Server Action / Route Handler 用。`cookies()` を使うため **async** で、`await createClient()` と呼ぶ。Server Component からは Cookie を書き込めないため `setAll` 内の例外は握りつぶしている。
+- 環境変数は `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_PUBLISHABLE`（publishable キー。旧 anon キーではない）の2つ。
+  - `.env.local` に設定する（`.env*` は gitignore 済み。雛形の `.env.example` のみコミット対象）。
+  - 読み出しは `env.ts` の `getSupabaseEnv()` に集約しており、未設定なら例外を投げる。`process.env` を各所で直接参照しないこと。
+  - service_role / secret キーは `NEXT_PUBLIC_` を付けてクライアントに露出させないこと。
+- 接続確認: `src/instrumentation.ts` の `register()` がサーバー起動時に1回だけ `checkSupabaseConnection()`（`check-connection.ts`、`/auth/v1/health` に apikey ヘッダー付きで問い合わせ、5秒タイムアウト）を実行する。
+  - 成功時は何も出力せず、失敗時のみ `console.error` で `[Supabase] 接続失敗: <理由>` を出す。ログが出なければ接続成功。
+  - `register()` は起動時にしか走らないため、`.env.local` を変更したら開発サーバーを再起動する。
+- テストでは実通信せず、`vi.stubEnv` で環境変数を、`vi.stubGlobal("fetch", ...)` で fetch をモックする（`src/__tests__/check-connection.test.ts` 参照）。`afterEach` で `vi.unstubAllEnvs()` / `vi.unstubAllGlobals()` を呼んでテスト間で状態を共有しないこと。
+- Supabase MCP（`.mcp.json`）が設定済み。テーブル定義の確認やマイグレーション、型生成（`generate_typescript_types`）はこれを使う。スキーマ変更前には既存テーブルを確認すること。
+
 ## テスト
 
 - Vitest + jsdom + React Testing Library。`vitest.setup.ts` で `@testing-library/jest-dom/vitest` のマッチャー登録と、各テスト後の `cleanup()` を行っている。
