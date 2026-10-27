@@ -24,6 +24,10 @@ Next.js + Supabase で構築し、Vercelにデプロイすることを想定し�
    - `TaskCard`: 表示と、カード内での編集切り替え。削除は `ConfirmDialog` で確認してから実行する。
    - `ConfirmDialog`: `role="alertdialog"` の自前ダイアログ。`window.confirm` は使わない。初期フォーカスはキャンセル、Esc でキャンセル。
 4. 型・定数は `src/lib/tasks/types.ts` に集約。`Task` / `TaskStatus` は生成型（`database.types.ts`）から派生させ、手書きで重複定義しない。列の並びと表示ラベルは `TASK_STATUSES` を使う。
+5. テーマ（ダークモード）は `next-themes` で `<html>` の `.dark` クラスを切り替える。
+   - `src/app/layout.tsx` で全体を `ThemeProvider`（`src/components/ThemeProvider.tsx`）で包んでいる（`attribute="class"` / `defaultTheme="system"` / `enableSystem`）。`<html>` の `suppressHydrationWarning` は next-themes に必要なので消さないこと。
+   - `ModeToggle`（`src/components/ModeToggle.tsx`）: 見出し横のボタン（accessible name「テーマを切り替え」）から ライト / ダーク / システム を選ぶ。選択は localStorage の `theme` に保存される。
+   - `dark:` バリアントは `globals.css` の `@custom-variant dark (&:is(.dark *))` で `.dark` クラス基準になっている。`prefers-color-scheme` のメディアクエリでダーク用スタイルを書かないこと（OS 設定への追従は next-themes の `system` が担う）。
 
 ## データベース
 
@@ -64,6 +68,16 @@ npx vitest run -t "見出しが表示される"
 - ページ・レイアウトの props 型には Next.js が自動生成するグローバル型（例: `LayoutProps<"/">`）を使っている。
 - パスエイリアス `@/*` → `./src/*`（tsconfig と Vitest の `resolve.tsconfigPaths` で共通）。
 
+## UI コンポーネント（shadcn/ui）
+
+- shadcn/ui を `npx shadcn@latest init --defaults` で導入済み。設定は `components.json`（style `base-nova` / baseColor `neutral` / アイコン `lucide-react` / `rsc: true`）。
+- コンポーネントの追加は `npx shadcn@latest add <name>`。`src/components/ui/` に生成される（現在は `button` / `dropdown-menu`）。生成物はプロジェクトのコードとして扱い、必要なら編集してよい。
+- **プリミティブは Radix ではなく Base UI（`@base-ui/react`）**。公式ドキュメントや Context7 のサンプルは Radix 前提の `asChild` で書かれていることが多いが、Base UI には無い。子要素として描画させたいときは `render` prop を使う（例: `<DropdownMenuTrigger render={<Button variant="outline" size="icon" />}>`）。
+- クラス結合は `cn()` を使う。`src/lib/utils.ts` は `cn` パッケージの再エクスポート（`export { cn } from "cn"`、2026年9月の shadcn の変更による）で、`clsx` / `tailwind-merge` は直接使わない。自前のコードは `@/lib/utils` から import する。
+- テーマ色は `globals.css` の `:root`（ライト）と `.dark`（ダーク）に OKLCH の CSS 変数で定義され、`@theme inline` で `bg-background` / `text-foreground` / `border-border` などのユーティリティに対応付けられている。色を変えるときはこの CSS 変数を編集する。
+- フォント: `@theme inline` の `--font-sans` は `layout.tsx` の Geist（`--font-geist-sans`）を参照している。`shadcn init` は `--font-sans: var(--font-sans)` という自己参照を書き込むことがあるので、init / 再生成後は確認すること。
+- 既存の `TaskBoard` / `TaskForm` / `TaskCard` / `ConfirmDialog` はまだ shadcn コンポーネントに置き換えていない（素の要素 + Tailwind）。置き換えるときは「テスト」節に挙げた role と accessible name を維持すること。
+
 ## Supabase 接続設定
 
 - パッケージは `@supabase/ssr` + `@supabase/supabase-js`。クライアントは `src/lib/supabase/` 配下のものを使い、`createBrowserClient` / `createServerClient` を直接呼ばないこと。
@@ -88,7 +102,9 @@ npx vitest run -t "見出しが表示される"
   - 新しいクエリの書き方（メソッドチェーン）を使ったら、フェイクにも同じチェーンを追加する。
 - async Server Component のページは `render(await Home())` で描画してテストする。
 - `@testing-library/user-event` は未導入。操作は `fireEvent`、非同期の反映は `findBy*` で待つ。
-- 要素は role と accessible name で取る（列は `region`、カードはタイトル名の `article`、フォームは `form`（「タスクを追加」/「タスクを編集」）、削除確認は `alertdialog`、エラーは `alert`）。UI を変えるときはこれらの role と名前を維持すること。
+- 要素は role と accessible name で取る（列は `region`、カードはタイトル名の `article`、フォームは `form`（「タスクを追加」/「タスクを編集」）、削除確認は `alertdialog`、エラーは `alert`、テーマ切り替えは `button`「テーマを切り替え」とその `menuitem`「ライト」/「ダーク」/「システム」）。UI を変えるときはこれらの role と名前を維持すること。
+- テーマ（next-themes）のテストは `src/__tests__/mode-toggle.test.tsx` 参照。jsdom には `matchMedia` が無いため `vi.stubGlobal("matchMedia", ...)` で OS 設定を差し替え、`ThemeProvider` で包んで描画し、`document.documentElement` の `dark` クラスと localStorage の `theme` を検証する。`afterEach` で `localStorage.clear()` と `<html>` の class / style のリセットを行うこと。
+- shadcn（Base UI）のメニューは jsdom でも `fireEvent.click` でトリガーを押せば開き、項目は `findByRole("menuitem", { name })` で取れる。
 
 ## テストルール
 

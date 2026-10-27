@@ -1,3 +1,4 @@
+import { ModeToggle } from "@/components/ModeToggle";
 import { TaskBoard } from "@/components/TaskBoard";
 import { fetchTasks } from "@/lib/tasks/queries";
 
@@ -6,7 +7,10 @@ export default async function Home() {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-10 font-sans">
-      <h1 className="text-2xl font-semibold">タスクカンバン</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">タスクカンバン</h1>
+        <ModeToggle />
+      </div>
       {result.ok ? (
         <TaskBoard initialTasks={result.data} />
       ) : (
