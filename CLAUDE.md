@@ -71,12 +71,15 @@ npx vitest run -t "見出しが表示される"
 ## UI コンポーネント（shadcn/ui）
 
 - shadcn/ui を `npx shadcn@latest init --defaults` で導入済み。設定は `components.json`（style `base-nova` / baseColor `neutral` / アイコン `lucide-react` / `rsc: true`）。
-- コンポーネントの追加は `npx shadcn@latest add <name>`。`src/components/ui/` に生成される（現在は `button` / `dropdown-menu`）。生成物はプロジェクトのコードとして扱い、必要なら編集してよい。
+- コンポーネントの追加は `npx shadcn@latest add <name>`。`src/components/ui/` に生成される（現在は `alert` / `badge` / `button` / `card` / `dropdown-menu` / `input` / `label` / `native-select` / `skeleton` / `textarea`）。生成物はプロジェクトのコードとして扱い、必要なら編集してよい。
 - **プリミティブは Radix ではなく Base UI（`@base-ui/react`）**。公式ドキュメントや Context7 のサンプルは Radix 前提の `asChild` で書かれていることが多いが、Base UI には無い。子要素として描画させたいときは `render` prop を使う（例: `<DropdownMenuTrigger render={<Button variant="outline" size="icon" />}>`）。
 - クラス結合は `cn()` を使う。`src/lib/utils.ts` は `cn` パッケージの再エクスポート（`export { cn } from "cn"`、2026年9月の shadcn の変更による）で、`clsx` / `tailwind-merge` は直接使わない。自前のコードは `@/lib/utils` から import する。
 - テーマ色は `globals.css` の `:root`（ライト）と `.dark`（ダーク）に OKLCH の CSS 変数で定義され、`@theme inline` で `bg-background` / `text-foreground` / `border-border` などのユーティリティに対応付けられている。色を変えるときはこの CSS 変数を編集する。
 - フォント: `@theme inline` の `--font-sans` は `layout.tsx` の Geist（`--font-geist-sans`）を参照している。`shadcn init` は `--font-sans: var(--font-sans)` という自己参照を書き込むことがあるので、init / 再生成後は確認すること。
-- 既存の `TaskBoard` / `TaskForm` / `TaskCard` / `ConfirmDialog` はまだ shadcn コンポーネントに置き換えていない（素の要素 + Tailwind）。置き換えるときは「テスト」節に挙げた role と accessible name を維持すること。
+- カンバンの UI（`TaskBoard` / `TaskForm` / `TaskCard` / `ConfirmDialog` / `page.tsx` / `loading.tsx`）は shadcn コンポーネントで組んでいる。色は `bg-card` / `text-muted-foreground` などのトークンを使い、`zinc-*` などを直書きしない（例外: 列見出しのステータス色ドット）。UI を変えるときは「テスト」節に挙げた role と accessible name を維持すること。
+  - ステータスの選択は `native-select`（ネイティブ `<select>`）。テストが `fireEvent.change` で値を変えるため、Base UI の `Select` には置き換えない。
+  - 削除確認に shadcn の `alert-dialog` は使わない。Base UI のモーダルは開いている間ほかの要素を aria-hidden にし、ダイアログ表示中に背景のカードを参照するテストが通らないため。`ConfirmDialog` は見た目だけ AlertDialog に揃えた自前実装。
+  - カードの編集・削除はアイコンボタンで、`aria-label`（「編集」「削除」）で accessible name を付けている。
 
 ## Supabase 接続設定
 
